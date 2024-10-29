@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Stock Prediction Service</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <h2>Stock Prediction Service</h2>
+    <label for="ticker">Ticker:</label>
+    <input type="text" id="ticker" name="ticker">
+    <label for="period">Period (months):</label>
+    <input type="number" id="period" name="period" min="1" max="36">
+    <button onclick="trainModel()">Train Model</button>
+    <button onclick="getPrediction()">Predict</button>
+
+    <h3>Prediction Results</h3>
+    <canvas id="predictionChart"></canvas>
+    <p id="return"></p>
+    <p id="message"></p>
+
+    <script>
+        async function trainModel() {
+            const ticker = document.getElementById('ticker').value;
+            const response = await fetch('/train', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ticker })
+            });
+            if (response.ok) {
+                alert('Model training completed.');
+            } else {
+                alert('Model training failed.');
+            }
+        }
+
+        async function getPrediction() {
+            const ticker = document.getElementById('ticker').value;
+            const period = document.getElementById('period').value;
+            const response = await fetch('/predict', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ticker, period })
+            });
+            if (response.ok) {
+                const data = await response.json();
+                displayResults(data);
+            } else {
+                const errorData = await response.json();
+                document.getElementById('message').innerText = errorData.error;
+                document.getElementById('predictionChart').style.display = 'none';
+                document.getElementById('return').innerText = '';
+            }
+        }
+
+        function displayResults(data) {
+            document.getElementById('message').innerText = '';
+            const ctx = document.getElementById('predictionChart').getContext('2d');
+            document.getElementById('predictionChart').style.display = 'block';
+
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.predictions.map((_, i) => i + 1),
+                    datasets: [
+                        {
+                            label: 'Predicted Asset Value',
+                            data: data.predictions,
+                            borderColor: 'blue',
+                            fill: false
+                        }
+                    ]
+                }
+            });
+            document.getElementById('return').innerText = `Total Return: ${data.backtest.total_return.toFixed(2)}%`;
+        }
+    </script>
+</body>
+</html>
