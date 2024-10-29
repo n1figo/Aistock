@@ -31,9 +31,7 @@ class DQNAgent:
         return model
 
     def remember(self, state, action, reward, next_state, done):
-        # 상태 차원 조정
-        state = state.reshape(self.state_size)
-        next_state = next_state.reshape(self.state_size)
+        # 메모리에 경험 저장
         self.memory.append((state, action, reward, next_state, done))
 
     def act(self, state):
