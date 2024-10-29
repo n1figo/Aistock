@@ -6,8 +6,9 @@ from agent import DQNAgent
 import yfinance as yf
 import torch
 import os
+import time
 
-def train_agent(ticker):
+def train_agent(ticker, training_status, status_lock):
     # 모델 저장 폴더 생성
     if not os.path.exists('models'):
         os.makedirs('models')
@@ -15,17 +16,23 @@ def train_agent(ticker):
     # 주가 데이터 수집
     data = yf.download(ticker, period='5y')['Close'].values
 
-    # 데이터가 충분한지 확인
     if len(data) < 60:
-        print("Not enough data to train the model.")
+        with status_lock:
+            training_status[ticker] = {
+                'status': 'Not enough data to train the model.',
+                'progress': 0,
+                'estimated_time_remaining': 'N/A'
+            }
         return
 
     env = StockTradingEnv(data)
-    state_size = 3  # 상태 크기 (현재 주가, 보유 주식 수, 현금 잔고)
-    action_size = 3  # 행동 크기 (매수, 매도, 관망)
+    state_size = 3
+    action_size = 3
     agent = DQNAgent(state_size, action_size)
-    episodes = 50  # 학습 에피소드 수
+    episodes = 50
     batch_size = 32
+
+    start_time = time.time()
 
     for e in range(episodes):
         state = env.reset()
@@ -43,9 +50,31 @@ def train_agent(ticker):
             if len(agent.memory) > batch_size:
                 agent.replay(batch_size)
 
+        # 진행률과 남은 시간 계산
+        elapsed_time = time.time() - start_time
+        progress = int((e + 1) / episodes * 100)
+        average_time_per_episode = elapsed_time / (e + 1)
+        estimated_time_remaining = average_time_per_episode * (episodes - (e + 1))
+
+        # 학습 상태 업데이트
+        with status_lock:
+            training_status[ticker] = {
+                'status': 'Training in progress',
+                'progress': progress,
+                'estimated_time_remaining': f"{int(estimated_time_remaining)} 초"
+            }
+
         print(f"Episode {e+1}/{episodes}, Total Reward: {total_reward}")
 
-    # 학습된 모델 저장
+    # 모델 저장
     model_path = os.path.join('models', f"{ticker}_dqn_model.pth")
     torch.save(agent.model.state_dict(), model_path)
     print(f"Model saved to {model_path}")
+
+    # 학습 완료 상태로 업데이트
+    with status_lock:
+        training_status[ticker] = {
+            'status': 'Training completed',
+            'progress': 100,
+            'estimated_time_remaining': '0 초'
+        }

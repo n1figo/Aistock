@@ -14,12 +14,17 @@
     <button onclick="trainModel()">Train Model</button>
     <button onclick="getPrediction()">Predict</button>
 
+    <h3>Training Status</h3>
+    <div id="trainingStatus"></div>
+
     <h3>Prediction Results</h3>
     <canvas id="predictionChart"></canvas>
     <p id="return"></p>
     <p id="message"></p>
 
     <script>
+        let trainingInterval;
+
         async function trainModel() {
             const ticker = document.getElementById('ticker').value;
             const response = await fetch('/train', {
@@ -28,9 +33,22 @@
                 body: JSON.stringify({ ticker })
             });
             if (response.ok) {
-                alert('Model training completed.');
+                document.getElementById('trainingStatus').innerText = 'Training started...';
+                // 학습 상태를 주기적으로 조회
+                trainingInterval = setInterval(() => getTrainingStatus(ticker), 1000);
             } else {
                 alert('Model training failed.');
+            }
+        }
+
+        async function getTrainingStatus(ticker) {
+            const response = await fetch(`/training_status?ticker=${encodeURIComponent(ticker)}`);
+            if (response.ok) {
+                const data = await response.json();
+                document.getElementById('trainingStatus').innerText = `Status: ${data.status}, Progress: ${data.progress}%, Estimated Time Remaining: ${data.estimated_time_remaining}`;
+                if (data.status === 'Training completed' || data.status.startsWith('Not enough data')) {
+                    clearInterval(trainingInterval);
+                }
             }
         }
 
