@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ko">
 <head>
     <meta charset="UTF-8">
     <title>Stock Prediction Service</title>
@@ -21,6 +21,17 @@
     <canvas id="predictionChart"></canvas>
     <p id="return"></p>
     <p id="message"></p>
+
+    <!-- 딥러닝 예측 섹션 -->
+    <h2>딥러닝 예측</h2>
+    <button onclick="deepLearningPredict()">예측하기</button>
+
+    <div id="deepLearningResults">
+        <p>3개월 후 주가: <span id="price3m"></span></p>
+        <p>6개월 후 주가: <span id="price6m"></span></p>
+        <p>12개월 후 주가: <span id="price12m"></span></p>
+        <p>36개월 후 주가: <span id="price36m"></span></p>
+    </div>
 
     <script>
         let trainingInterval;
@@ -91,6 +102,25 @@
                 }
             });
             document.getElementById('return').innerText = `Total Return: ${data.backtest.total_return.toFixed(2)}%`;
+        }
+
+        async function deepLearningPredict() {
+            const ticker = document.getElementById('ticker').value;
+            const response = await fetch('/deep_learning_predict', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ticker })
+            });
+            if (response.ok) {
+                const data = await response.json();
+                document.getElementById('price3m').innerText = data['3_months'].toFixed(2);
+                document.getElementById('price6m').innerText = data['6_months'].toFixed(2);
+                document.getElementById('price12m').innerText = data['12_months'].toFixed(2);
+                document.getElementById('price36m').innerText = data['36_months'].toFixed(2);
+            } else {
+                const errorData = await response.json();
+                alert(errorData.error);
+            }
         }
     </script>
 </body>
