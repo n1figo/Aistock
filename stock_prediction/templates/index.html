@@ -22,6 +22,11 @@
     <p id="return"></p>
     <p id="message"></p>
 
+    <!-- 딥러닝 모델 학습 섹션 -->
+    <h2>딥러닝 모델 학습</h2>
+    <button onclick="trainDeepLearningModel()">Train Deep Learning Model</button>
+    <div id="deepLearningTrainingStatus"></div>
+
     <!-- 딥러닝 예측 섹션 -->
     <h2>딥러닝 예측</h2>
     <button onclick="deepLearningPredict()">예측하기</button>
@@ -35,6 +40,7 @@
 
     <script>
         let trainingInterval;
+        let deepLearningTrainingInterval;
 
         async function trainModel() {
             const ticker = document.getElementById('ticker').value;
@@ -102,6 +108,33 @@
                 }
             });
             document.getElementById('return').innerText = `Total Return: ${data.backtest.total_return.toFixed(2)}%`;
+        }
+
+        async function trainDeepLearningModel() {
+            const ticker = document.getElementById('ticker').value;
+            const response = await fetch('/train_deep_learning_model', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ticker })
+            });
+            if (response.ok) {
+                document.getElementById('deepLearningTrainingStatus').innerText = 'Training started...';
+                // 딥러닝 학습 상태를 주기적으로 조회
+                deepLearningTrainingInterval = setInterval(() => getDeepLearningTrainingStatus(ticker), 1000);
+            } else {
+                alert('Deep Learning model training failed.');
+            }
+        }
+
+        async function getDeepLearningTrainingStatus(ticker) {
+            const response = await fetch(`/deep_learning_training_status?ticker=${encodeURIComponent(ticker)}`);
+            if (response.ok) {
+                const data = await response.json();
+                document.getElementById('deepLearningTrainingStatus').innerText = `Status: ${data.status}, Progress: ${data.progress}%, Estimated Time Remaining: ${data.estimated_time_remaining}`;
+                if (data.status === 'Training completed' || data.status.startsWith('Not enough data')) {
+                    clearInterval(deepLearningTrainingInterval);
+                }
+            }
         }
 
         async function deepLearningPredict() {

@@ -8,6 +8,7 @@ import torch.nn as nn
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 import os
+import time
 
 class StockPricePredictor(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers, output_size):
@@ -74,23 +75,129 @@ def prepare_dataset(financial_data, prices):
     X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, shuffle=False)
     return X_train, X_val, X_test, y_train, y_val, y_test, scaler_X, scaler_y
 
-def train_model(model, X_train, y_train, X_val, y_val, num_epochs, criterion, optimizer):
-    for epoch in range(num_epochs):
-        model.train()
-        outputs = model(torch.Tensor(X_train))
-        optimizer.zero_grad()
-        loss = criterion(outputs, torch.Tensor(y_train))
-        loss.backward()
-        optimizer.step()
+def train_deep_learning_model(ticker, training_status, status_lock):
+    try:
+        financial_data = get_financial_data(ticker)
+        prices = get_historical_prices(ticker)
+        if financial_data.empty or prices.empty:
+            with status_lock:
+                training_status[ticker] = {
+                    'status': f'Failed to retrieve data for {ticker}.',
+                    'progress': 0,
+                    'estimated_time_remaining': 'N/A'
+                }
+            return
 
-        # 검증 손실 계산
-        model.eval()
-        with torch.no_grad():
-            val_outputs = model(torch.Tensor(X_val))
-            val_loss = criterion(val_outputs, torch.Tensor(y_val))
+        X_train, X_val, X_test, y_train, y_val, y_test, scaler_X, scaler_y = prepare_dataset(financial_data, prices)
 
-        if (epoch+1) % 10 == 0:
-            print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}, Val Loss: {val_loss.item():.4f}')
+        input_size = X_train.shape[2]
+        hidden_size = 50
+        num_layers = 2
+        output_size = 1
+        num_epochs = 50
+
+        model = StockPricePredictor(input_size, hidden_size, num_layers, output_size)
+        criterion = nn.MSELoss()
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+        start_time = time.time()
+
+        for epoch in range(num_epochs):
+            model.train()
+            outputs = model(torch.Tensor(X_train))
+            optimizer.zero_grad()
+            loss = criterion(outputs, torch.Tensor(y_train))
+            loss.backward()
+            optimizer.step()
+
+            # 검증 손실 계산
+            model.eval()
+            with torch.no_grad():
+                val_outputs = model(torch.Tensor(X_val))
+                val_loss = criterion(val_outputs, torch.Tensor(y_val))
+
+            # 진행률과 남은 시간 계산
+            elapsed_time = time.time() - start_time
+            progress = int((epoch + 1) / num_epochs * 100)
+            average_time_per_epoch = elapsed_time / (epoch + 1)
+            estimated_time_remaining = average_time_per_epoch * (num_epochs - (epoch + 1))
+
+            # 학습 상태 업데이트
+            with status_lock:
+                training_status[ticker] = {
+                    'status': 'Training in progress',
+                    'progress': progress,
+                    'estimated_time_remaining': f"{int(estimated_time_remaining)} 초"
+                }
+
+            if (epoch+1) % 10 == 0:
+                print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}, Val Loss: {val_loss.item():.4f}')
+
+        # 모델 저장 폴더 생성
+        if not os.path.exists('models'):
+            os.makedirs('models')
+
+        # 모델 저장
+        model_path = os.path.join('models', f"{ticker}_dl_model.pth")
+        torch.save({
+            'model_state_dict': model.state_dict(),
+            'scaler_X': scaler_X,
+            'scaler_y': scaler_y,
+            'input_size': input_size,
+            'hidden_size': hidden_size,
+            'num_layers': num_layers
+        }, model_path)
+        print(f"Deep Learning Model saved to {model_path}")
+
+        # 학습 완료 상태로 업데이트
+        with status_lock:
+            training_status[ticker] = {
+                'status': 'Training completed',
+                'progress': 100,
+                'estimated_time_remaining': '0 초'
+            }
+
+    except Exception as e:
+        with status_lock:
+            training_status[ticker] = {
+                'status': f'Error occurred: {str(e)}',
+                'progress': 0,
+                'estimated_time_remaining': 'N/A'
+            }
+
+def load_and_predict(ticker):
+    model_path = os.path.join('models', f"{ticker}_dl_model.pth")
+    if not os.path.exists(model_path):
+        return f"Deep Learning model for {ticker} not found. Please train the model first."
+
+    # 모델 및 스케일러 로드
+    checkpoint = torch.load(model_path)
+    input_size = checkpoint['input_size']
+    hidden_size = checkpoint['hidden_size']
+    num_layers = checkpoint['num_layers']
+
+    model = StockPricePredictor(input_size, hidden_size, num_layers, 1)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    scaler_X = checkpoint['scaler_X']
+    scaler_y = checkpoint['scaler_y']
+
+    # 마지막 입력 데이터 준비
+    financial_data = get_financial_data(ticker)
+    prices = get_historical_prices(ticker)
+    if financial_data.empty or prices.empty:
+        return f"Failed to retrieve data for {ticker}."
+
+    X_train, X_val, X_test, y_train, y_val, y_test, _, _ = prepare_dataset(financial_data, prices)
+    last_X = X_test[-1].reshape(1, 1, -1)
+
+    # 미래 주가 예측
+    future_periods = [3, 6, 12, 36]
+    predictions = {}
+    for period in future_periods:
+        future_prices = predict_future_prices(model, last_X, scaler_y, period)
+        predictions[f'{period}_months'] = future_prices[-1]
+
+    return [predictions['3_months'], predictions['6_months'], predictions['12_months'], predictions['36_months']]
 
 def predict_future_prices(model, last_X, scaler_y, periods):
     model.eval()
@@ -108,42 +215,3 @@ def predict_future_prices(model, last_X, scaler_y, periods):
     # 스케일링 복원
     predictions = scaler_y.inverse_transform(np.array(predictions).reshape(-1, 1))
     return predictions.flatten()
-
-def train_and_predict(ticker):
-    try:
-        financial_data = get_financial_data(ticker)
-        prices = get_historical_prices(ticker)
-        if financial_data.empty or prices.empty:
-            return f"Failed to retrieve data for {ticker}."
-
-        X_train, X_val, X_test, y_train, y_val, y_test, scaler_X, scaler_y = prepare_dataset(financial_data, prices)
-
-        input_size = X_train.shape[2]
-        hidden_size = 50
-        num_layers = 2
-        output_size = 1
-        num_epochs = 50
-
-        model = StockPricePredictor(input_size, hidden_size, num_layers, output_size)
-        criterion = nn.MSELoss()
-        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-
-        train_model(model, X_train, y_train, X_val, y_val, num_epochs, criterion, optimizer)
-
-        # 마지막 입력 데이터 가져오기
-        last_X = X_test[-1].reshape(1, 1, -1)
-
-        # 미래 주가 예측
-        future_periods = [3, 6, 12, 36]
-        predictions = {}
-        for period in future_periods:
-            future_prices = predict_future_prices(model, last_X, scaler_y, period)
-            predictions[f'{period}_months'] = future_prices[-1]
-
-        # 백테스트 결과 출력 (선택사항)
-        # backtest_model(model, X_test, y_test, scaler_y)
-
-        return [predictions['3_months'], predictions['6_months'], predictions['12_months'], predictions['36_months']]
-
-    except Exception as e:
-        return str(e)
