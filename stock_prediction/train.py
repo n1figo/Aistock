@@ -39,10 +39,10 @@ def train_agent(ticker, training_status, status_lock):
         total_reward = 0
 
         while not env.done:
-            state = np.reshape(state, [1, state_size])
+            state = np.reshape(state, [state_size])
             action = agent.act(state)
             next_state, reward, done, _ = env.step(action)
-            next_state = np.reshape(next_state, [1, state_size])
+            next_state = np.reshape(next_state, [state_size])
             agent.remember(state, action, reward, next_state, done)
             state = next_state
             total_reward += reward
@@ -66,7 +66,7 @@ def train_agent(ticker, training_status, status_lock):
 
         print(f"Episode {e+1}/{episodes}, Total Reward: {total_reward}")
 
-    # 모델 저장
+    # 학습된 모델 저장
     model_path = os.path.join('models', f"{ticker}_dqn_model.pth")
     torch.save(agent.model.state_dict(), model_path)
     print(f"Model saved to {model_path}")

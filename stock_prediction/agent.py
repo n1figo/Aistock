@@ -4,8 +4,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from collections import deque
 import random
+from collections import deque
 
 class DQNAgent:
     def __init__(self, state_size, action_size):
@@ -31,17 +31,19 @@ class DQNAgent:
         return model
 
     def remember(self, state, action, reward, next_state, done):
-        # 경험을 메모리에 저장
+        # 상태 차원 조정
+        state = state.reshape(self.state_size)
+        next_state = next_state.reshape(self.state_size)
         self.memory.append((state, action, reward, next_state, done))
 
     def act(self, state):
         # 행동 선택: ε-탐욕 정책 사용
         if np.random.rand() <= self.epsilon:
             return random.randrange(self.action_size)
-        state = torch.FloatTensor(state)
+        state = torch.FloatTensor(state).unsqueeze(0)
         with torch.no_grad():
             act_values = self.model(state)
-        return torch.argmax(act_values).item()
+        return torch.argmax(act_values[0]).item()
 
     def replay(self, batch_size):
         # 미니배치 샘플링
@@ -49,21 +51,35 @@ class DQNAgent:
         optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
         criterion = nn.MSELoss()
 
-        for state, action, reward, next_state, done in minibatch:
-            state = torch.FloatTensor(state)
-            next_state = torch.FloatTensor(next_state)
-            target = reward
-            if not done:
-                target += self.gamma * torch.max(self.model(next_state)).item()
-            target_f = self.model(state)
-            target_f = target_f.clone().detach()
-            target_f[action] = target
+        # 미니배치에서 상태, 행동, 보상, 다음 상태, 완료 여부 추출
+        states = np.array([sample[0] for sample in minibatch])
+        actions = np.array([sample[1] for sample in minibatch])
+        rewards = np.array([sample[2] for sample in minibatch])
+        next_states = np.array([sample[3] for sample in minibatch])
+        dones = np.array([sample[4] for sample in minibatch])
 
-            optimizer.zero_grad()
-            outputs = self.model(state)
-            loss = criterion(outputs, target_f)
-            loss.backward()
-            optimizer.step()
+        # 텐서로 변환
+        states = torch.FloatTensor(states)
+        actions = torch.LongTensor(actions)
+        rewards = torch.FloatTensor(rewards)
+        next_states = torch.FloatTensor(next_states)
+        dones = torch.FloatTensor(dones)
+
+        # 현재 상태에서의 Q값 계산
+        q_values = self.model(states)
+        q_values = q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
+
+        # 다음 상태에서의 최대 Q값 계산
+        next_q_values = self.model(next_states).max(1)[0]
+        target_q_values = rewards + (1 - dones) * self.gamma * next_q_values
+
+        # 손실 계산
+        loss = criterion(q_values, target_q_values.detach())
+
+        # 역전파 및 모델 업데이트
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
         # 탐험률 감소
         if self.epsilon > self.epsilon_min:
