@@ -1,67 +1,79 @@
-# environment.py
+# my_trading_model.py
 
+import torch
 import numpy as np
+import yfinance as yf
+from agent import DQNAgent
+from environment import StockTradingEnv
+import os
 
-class StockTradingEnv:
-    def __init__(self, data):
-        self.data = data  # 주가 데이터 (numpy 배열)
-        self.n_steps = len(data)
-        self.current_step = 0
-        self.initial_cash = 10000  # 초기 자본
-        self.cash = self.initial_cash
-        self.stock_holdings = 0
-        self.total_asset = self.initial_cash
-        self.done = False
+def predict(ticker, period):
+    state_size = 3
+    action_size = 3
 
-    def reset(self):
-        self.current_step = 0
-        self.cash = self.initial_cash
-        self.stock_holdings = 0
-        self.total_asset = self.initial_cash
-        self.done = False
-        return self._get_observation()
+    # 모델 경로 설정
+    model_path = os.path.join('models', f"{ticker}_dqn_model.pth")
 
-    def _get_observation(self):
-        # 현재 상태 반환: [현재 주가, 보유 주식 수, 현금 잔고]
-        current_price = float(self.data[self.current_step])
-        obs = np.array([
-            current_price,
-            self.stock_holdings,
-            self.cash
-        ], dtype=float)
-        return obs
+    # 모델 로드
+    agent = DQNAgent(state_size, action_size)
+    if os.path.exists(model_path):
+        agent.model.load_state_dict(torch.load(model_path))
+    else:
+        return f"Model for {ticker} not found. Please train the model first."
 
-    def step(self, action):
-        """
-        action: 0 (매수), 1 (매도), 2 (관망)
-        """
-        current_price = float(self.data[self.current_step])
+    # 예측 기간 동안의 데이터 수집
+    data = yf.download(ticker, period=f'{int(period)*2}mo')['Close'].values
+    env = StockTradingEnv(data)
+    state = env.reset()
+    total_assets = []
 
-        if action == 0:  # 매수
-            # 최대한 매수할 수 있는 주식 수 계산
-            max_shares = self.cash // current_price
-            if max_shares > 0:
-                self.stock_holdings += max_shares
-                self.cash -= max_shares * current_price
-        elif action == 1:  # 매도
-            if self.stock_holdings > 0:
-                self.cash += self.stock_holdings * current_price
-                self.stock_holdings = 0
-        # 관망(2)일 경우 아무 것도 하지 않음
+    while not env.done:
+        state = np.reshape(state, [state_size])
+        action = agent.act(state)
+        next_state, _, done, _ = env.step(action)
+        total_assets.append(env.total_asset)
+        state = next_state
 
-        self.current_step += 1
+    # 예측 결과 반환
+    return total_assets[:int(period)]
 
-        # 에피소드 종료 조건
-        if self.current_step >= self.n_steps - 1:
-            self.done = True
+def backtest(ticker, period):
+    # 과거 데이터 수집
+    data = yf.download(ticker, period=f'{int(period)*2}mo')['Close'].values
+    env = StockTradingEnv(data)
+    state_size = 3
+    action_size = 3
 
-        # 총 자산 계산
-        self.total_asset = self.cash + self.stock_holdings * current_price
+    # 모델 경로 설정
+    model_path = os.path.join('models', f"{ticker}_dqn_model.pth")
 
-        # 보상 계산: 총 자산의 변화량
-        reward = self.total_asset - self.initial_cash
+    # 모델 로드
+    agent = DQNAgent(state_size, action_size)
+    if os.path.exists(model_path):
+        agent.model.load_state_dict(torch.load(model_path))
+    else:
+        return {
+            'predicted_assets': [],
+            'total_return': 0,
+            'message': f"Model for {ticker} not found. Please train the model first."
+        }
 
-        # 다음 상태 관찰
-        next_obs = self._get_observation()
+    state = env.reset()
+    predicted_assets = []
+    initial_asset = env.total_asset
 
-        return next_obs, reward, self.done, {}
+    while not env.done:
+        state = np.reshape(state, [state_size])
+        action = agent.act(state)
+        next_state, _, done, _ = env.step(action)
+        predicted_assets.append(env.total_asset)
+        state = next_state
+
+    # 수익률 계산
+    total_return = (env.total_asset - initial_asset) / initial_asset * 100
+
+    return {
+        'predicted_assets': predicted_assets[:int(period)],
+        'total_return': total_return,
+        'message': "Backtest completed."
+    }
