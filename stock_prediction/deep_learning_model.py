@@ -35,13 +35,49 @@ def get_financial_data(ticker):
     # 필요한 재무 지표 계산
     financial_data = pd.DataFrame()
     financial_data['Date'] = balance_sheet.index
-    financial_data['Total Assets'] = balance_sheet['Total Assets']
-    financial_data['Total Liab'] = balance_sheet['Total Liab']
-    financial_data['Total Revenue'] = income_statement['Total Revenue']
-    financial_data['Net Income'] = income_statement['Net Income']
-    financial_data['Operating Cash Flow'] = cash_flow['Total Cash From Operating Activities']
+
+    # 'Total Assets' 열 확인 및 처리
+    if 'Total Assets' in balance_sheet.columns:
+        financial_data['Total Assets'] = balance_sheet['Total Assets']
+    else:
+        financial_data['Total Assets'] = np.nan
+
+    # 'Total Liab' 열 확인 및 처리
+    if 'Total Liab' in balance_sheet.columns:
+        financial_data['Total Liab'] = balance_sheet['Total Liab']
+    else:
+        financial_data['Total Liab'] = np.nan
+
+    # 'Total Revenue' 열 확인 및 처리
+    if 'Total Revenue' in income_statement.columns:
+        financial_data['Total Revenue'] = income_statement['Total Revenue']
+    else:
+        financial_data['Total Revenue'] = np.nan
+
+    # 'Net Income' 열 확인 및 처리
+    if 'Net Income' in income_statement.columns:
+        financial_data['Net Income'] = income_statement['Net Income']
+    else:
+        financial_data['Net Income'] = np.nan
+
+    # 'Total Cash From Operating Activities' 열 확인 및 처리
+    if 'Total Cash From Operating Activities' in cash_flow.columns:
+        financial_data['Operating Cash Flow'] = cash_flow['Total Cash From Operating Activities']
+    else:
+        financial_data['Operating Cash Flow'] = np.nan
+
+    # 재무 비율 계산 시 결측치 처리
     financial_data['Debt Ratio'] = financial_data['Total Liab'] / financial_data['Total Assets']
     financial_data['ROE'] = financial_data['Net Income'] / (financial_data['Total Assets'] - financial_data['Total Liab'])
+
+    # 결측치 제거 또는 대체
+    financial_data = financial_data.dropna()
+
+    # 데이터가 충분한지 확인
+    if financial_data.empty or len(financial_data) < 4:
+        print(f"Not enough financial data for {ticker}.")
+        return pd.DataFrame()
+
     financial_data.reset_index(drop=True, inplace=True)
     return financial_data
 
@@ -79,10 +115,10 @@ def train_deep_learning_model(ticker, training_status, status_lock):
     try:
         financial_data = get_financial_data(ticker)
         prices = get_historical_prices(ticker)
-        if financial_data.empty or prices.empty:
+        if financial_data.empty or prices.empty or len(financial_data) < 4:
             with status_lock:
                 training_status[ticker] = {
-                    'status': f'Failed to retrieve data for {ticker}.',
+                    'status': f'Not enough financial data for {ticker}.',
                     'progress': 0,
                     'estimated_time_remaining': 'N/A'
                 }
@@ -184,8 +220,8 @@ def load_and_predict(ticker):
     # 마지막 입력 데이터 준비
     financial_data = get_financial_data(ticker)
     prices = get_historical_prices(ticker)
-    if financial_data.empty or prices.empty:
-        return f"Failed to retrieve data for {ticker}."
+    if financial_data.empty or prices.empty or len(financial_data) < 4:
+        return f"Not enough financial data for {ticker}."
 
     X_train, X_val, X_test, y_train, y_val, y_test, _, _ = prepare_dataset(financial_data, prices)
     last_X = X_test[-1].reshape(1, 1, -1)
